@@ -1,7 +1,7 @@
 {
     "apiNode": "https://api-2.testnet2.xpxsirius.io/",
     "botApiKey": "<TELEGRAM_BOT_API_KEY>",
-    "chatID": "<TELEGRAM_CHAT_ID>",
+    "chatID": 11111,
     "minAmount": 5000000000000000000000000000000000,
     "sleep": 60,
     "accounts": [
