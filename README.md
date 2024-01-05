@@ -1,6 +1,6 @@
 # go-xpx-check-token-util
 
-The check token util script is a tool to detect the balance of assets in specific accounts. Alert will be sent to the relevant accounts via Telegram to top up their assets if they are found to be less than the specified amount.
+The check token util script is a tool to detect the balance of particular assets in specific accounts. Alert will be sent to the relevant accounts via Telegram to top up their assets if they are found to be less than the specified amount.
 
 # Getting Started
 
@@ -48,6 +48,8 @@ Configurations can be made to the script by changing the values to the fields in
 * `sleep`: The time interval (in seconds) of checking the assets' balance
 * `accounts`: List of accounts to be checked
 * `mosaics`: List of assets to be checked
+
+Note that the default values in config.json are presented solely as examples.
 
 # Running the Script
 ```go
