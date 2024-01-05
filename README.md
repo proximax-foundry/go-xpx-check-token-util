@@ -49,6 +49,8 @@ Configurations can be made to the script by changing the values to the fields in
 * `accounts`: List of accounts to be checked
 * `mosaics`: List of assets to be checked
 
+Note that the default values in config.json are presented solely as examples.
+
 # Running the Script
 ```go
 go run main.go
