@@ -34,7 +34,10 @@ Configurations can be made to the script by changing the values to the fields in
     ],
     "mosaics": [
         "13BFC518E40549D7",
-        "705BAFA9B6903C08"
+        "705BAFA9B6903C08",
+        "2D829694552B1189",
+        "52FC262C2AB5CAE5",
+        "69DD64ED4343011C"
     ]
 }
 ```
@@ -44,7 +47,7 @@ Configurations can be made to the script by changing the values to the fields in
 * `minAmount`: The amount where if the asset’s balance falls lower than that, an alert will be sent
 * `sleep`: The time interval (in seconds) of checking the assets' balance
 * `accounts`: List of accounts to be checked
-* `mosaics`: List of mosaics to be checked
+* `mosaics`: List of assets to be checked
 
 # Running the Script
 ```go
