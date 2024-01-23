@@ -16,22 +16,26 @@ import (
 )
 
 type Config struct {
-    ApiNode       *string
-    BotApiKey     *string
-    ChatID        *int64
-    MinAmount     *float64
-    Sleep         *int
-    Accounts      []*string
-    Mosaics       []*string
+    ApiNode             *string
+    BotApiKey           *string
+    ChatID              *int64
+    Sleep               *int
+    Account             *string
+    Mosaic              *string
+    ThresholdBalance    *float64
+    AccProfile          *string
 }
 
-type MosaicDetail struct {
-    Account       string
-    Names         []*string
-}
+var config Config
+var client *sdk.Client
+var account *sdk.AccountInfo
+var mosaic uint64
+var divisibility float64
+var mosaicName string
+var currBalance float64
 
 func main() {
-    config, err := readConfig()
+    err := readConfig()
     if err != nil {
         errHandling(err)
     }
@@ -40,62 +44,24 @@ func main() {
     if err != nil {
         errHandling(fmt.Errorf("Failed to get config for HTTP Client: %v\n", err))
     }
-    client := sdk.NewClient(nil, conf)
+    client = sdk.NewClient(nil, conf)
 
-    accountsToCheck, mosaicsToCheck, err := validateAccMosaic(config, client)
+    account, mosaic, err = validateAccMosaic()
     if err != nil {
         errHandling(fmt.Errorf("Failed validation: %v\n", err))
     }
 
-    accsInfo, err := client.Account.GetAccountsInfo(context.Background(), accountsToCheck...)
-    if err != nil {
-        errHandling(fmt.Errorf("Failed to get Accounts Info: %v\n", err))
-    }
-
+    divisibility, mosaicName = getMosaicDetails()
     for {
-        targetAccs := []*MosaicDetail{}
-        for _, accInfo := range accsInfo {
-            accMosaics := accInfo.Mosaics
-            var mosaicNames []*string
-            for _, accMosaic := range accMosaics {
-                mosaicIdUint64 := accMosaic.AssetId.Id()
-                for i, _ := range mosaicsToCheck {
-                    if mosaicsToCheck[i] == mosaicIdUint64 {
-                        mosaicId, err := sdk.NewMosaicId(mosaicIdUint64)
-                        if err != nil {
-                            errHandling(fmt.Errorf("Failed to get Mosaic ID: %v\n", err))
-                        }
-                        mosaicInfo, err := client.Mosaic.GetMosaicInfo(context.Background(), mosaicId)
-                        if err != nil {
-                            errHandling(fmt.Errorf("Failed to get Mosaic Info: %v\n", err))
-                        }
-                        divisibility := float64(mosaicInfo.Properties.MosaicPropertiesHeader.Divisibility)
-                        if float64(accMosaic.Amount)/math.Pow(10, divisibility) < *config.MinAmount {
-                            mosaic, err := client.Mosaic.GetMosaicsNames(context.Background(), mosaicId)
-                            if err != nil {
-                                errHandling(fmt.Errorf("Failed to get Mosaic Name: %v\n", err))
-                            }
-                            mosaicName := mosaic[0].Names[0]
-                            j := strings.Index(mosaicName, ".")
-                            if j > -1 {
-                                mosaicName = mosaicName[j+1:]
-                            }
-                            mosaicNames = append(mosaicNames, &mosaicName)
-                        }
-                    } 
+        for _, accMosaic := range account.Mosaics {
+            mosaicIdUint64 := accMosaic.AssetId.Id()
+            currBalance = float64(accMosaic.Amount)/math.Pow(10, divisibility)
+            if mosaic == mosaicIdUint64 && currBalance < *config.ThresholdBalance {
+                err := sendAlert()
+                if err != nil {
+                    errHandling(fmt.Errorf("Failed to send alert: %v\n", err))
                 }
-            }
-            if len(mosaicNames) > 0 {
-                targetAccs = append(targetAccs, &MosaicDetail{
-                    Account: accInfo.Address.Address,
-                    Names: mosaicNames,
-                })
-            }
-        }
-        if len(targetAccs) > 0 {
-            err := sendAlert(config, targetAccs...)
-            if err != nil {
-                errHandling(fmt.Errorf("Failed to send alert: %v\n", err))
+                break
             }
         }
         time.Sleep(time.Duration(*config.Sleep) * time.Second)
@@ -129,54 +95,68 @@ func checkMissingFields(config Config) (error) {
     return nil
 }
 
-func constructMsg(config Config, targets ...*MosaicDetail) (string, []tgbotapi.MessageEntity, error) {
-    n := 0
-    strMsg := "The following accounts' assets have balance less than " + strconv.FormatFloat(*config.MinAmount, 'f', -1, 64) + ": \n\n"
-    strMsgLen := len(strMsg)
-    entities := []tgbotapi.MessageEntity{}
-    for i, target := range targets {
-        entities = append(entities, tgbotapi.MessageEntity{
-            Type: "text_link",
-            Offset: i*41 + n + strMsgLen,
-            Length: 40,
-            URL: "https://bctestnetexplorer.xpxsirius.io/#/account/" + target.Account,
-        })
-
-        strMsg += target.Account + "\n"
-        for _, mosaicName := range target.Names {
-            strMsg += "- " + strings.ToUpper(*mosaicName) + "\n"
-            n += len(*mosaicName) + 3
-        }
-    }
-    return strMsg, entities, nil
+func constructMsg() (string, []tgbotapi.MessageEntity) {
+    strBalance := strconv.FormatFloat(*config.ThresholdBalance, 'f', -1, 64)
+    strMsg := fmt.Sprintf(
+        "Your account %s has %s balance less than %s, currently %f %s", 
+        *config.Account, mosaicName, strBalance, currBalance, mosaicName)
+    var entities []tgbotapi.MessageEntity
+    entities = append(entities, tgbotapi.MessageEntity{
+        Type: "text_link",
+        Offset: 13,
+        Length: 40,
+        URL: *config.AccProfile + *config.Account,
+    })
+    return strMsg, entities
 }
 
 func errHandling(err error) {
     log.Fatal("Error: ", err)
 }
 
-func readConfig() (Config, error) {
-    configFile, err := os.Open("config.json")
-
+func getMosaicDetails() (float64, string) {
+    mosaicId, err := sdk.NewMosaicId(mosaic)
     if err != nil {
-        return Config{}, fmt.Errorf("Cannot open config.json: %v\n", err)
+        errHandling(fmt.Errorf("Failed to get Mosaic ID: %v\n", err))
     }
+    mosaicInfo, err := client.Mosaic.GetMosaicInfo(context.Background(), mosaicId)
+    if err != nil {
+        errHandling(fmt.Errorf("Failed to get Mosaic Info: %v\n", err))
+    }
+    // get divisibility
+    divisibility := float64(mosaicInfo.Properties.MosaicPropertiesHeader.Divisibility)
+    mosaicNames, err := client.Mosaic.GetMosaicsNames(context.Background(), mosaicId)
+    if err != nil {
+        errHandling(fmt.Errorf("Failed to get Mosaic Name: %v\n", err))
+    }
+    // get mosaic name
+    mosaicName := mosaicNames[0].Names[0]
+    j := strings.Index(mosaicName, ".")
+    if j > -1 {
+        mosaicName = mosaicName[j+1:]
+    }
+    return divisibility, strings.ToUpper(mosaicName)
+}
 
-    var config Config
+func readConfig() (error) {
+    configFile, err := os.Open("config.json")
+    if err != nil {
+        return fmt.Errorf("Cannot open config.json: %v\n", err)
+    }
     defer configFile.Close()
 
     jsonParser := json.NewDecoder(configFile)
     if jsonParser.Decode(&config); err != nil {
-        return Config{}, fmt.Errorf("Cannot decode config.json: %v\n", err)
+        return fmt.Errorf("Cannot decode config.json: %v\n", err)
     }
     
     if err = checkMissingFields(config); err != nil {
-        return config, err
+        return err
     }
-    return config, nil
+    return nil
 }
 
-func sendAlert(config Config, targets ...*MosaicDetail) (error) {
+func sendAlert() (error) {
     bot, err := tgbotapi.NewBotAPI(*config.BotApiKey)
     if err != nil {
         return fmt.Errorf("Failed to create BotAPI instance: %v\n", err)
@@ -185,43 +165,33 @@ func sendAlert(config Config, targets ...*MosaicDetail) (error) {
     updateConfig := tgbotapi.NewUpdate(0)
     updateConfig.Timeout = 30
 
-    strMessage, entities, err := constructMsg(config, targets...)
-    if err != nil {
-        return fmt.Errorf("Failed to construct Telegram message: %v\n", err)
-    }
+    strMessage, entities := constructMsg()
     msg := tgbotapi.NewMessage(*config.ChatID, strMessage)
     msg.Entities = entities
     bot.Send(msg)
     return nil
 }
 
-func validateAccMosaic(config Config, client *sdk.Client) ([]*sdk.Address, []uint64, error) {
-    var accounts []*sdk.Address
-    var mosaics []uint64
-
-    for _, acc := range config.Accounts {
-        address := sdk.NewAddress(*acc, client.NetworkType())
-        _, err := client.Account.GetAccountInfo(context.Background(), address)
-        if err != nil {
-            return accounts, mosaics, fmt.Errorf("Invalid account: %v\n", err)
-        }
-        accounts = append(accounts, address)
+func validateAccMosaic() (*sdk.AccountInfo, uint64, error) {
+    address := sdk.NewAddress(*config.Account, client.NetworkType())
+    account, err := client.Account.GetAccountInfo(context.Background(), address)
+    if err != nil {
+        return nil, 0, fmt.Errorf("Invalid account: %v\n", err)
     }
 
-    for _, mosaic := range config.Mosaics {
-        mosaicIdUint64, err := strconv.ParseUint(*mosaic, 16, 64)
-        if err != nil {
-            return accounts, mosaics, fmt.Errorf("Failed to parse mosaic ID as Uint64: %v\n", err)
-        }
-        mosaicId, err := sdk.NewMosaicId(mosaicIdUint64)
-        if err != nil {
-            return accounts, mosaics, fmt.Errorf("Failed to get Mosaic ID: %v\n", err)
-        }
-        _, err = client.Mosaic.GetMosaicInfo(context.Background(), mosaicId)
-        if err != nil {
-            return accounts, mosaics, fmt.Errorf("Invalid mosaic: %v\n", err)
-        }
-        mosaics = append(mosaics, mosaicIdUint64)
+    mosaicIdUint64, err := strconv.ParseUint(*config.Mosaic, 16, 64)
+    if err != nil {
+        return account, mosaicIdUint64, fmt.Errorf("Failed to parse mosaic ID as Uint64: %v\n", err)
     }
-    return accounts, mosaics, nil
+
+    mosaicId, err := sdk.NewMosaicId(mosaicIdUint64)
+    if err != nil {
+        return account, mosaicIdUint64, fmt.Errorf("Failed to get Mosaic ID: %v\n", err)
+    }
+
+    _, err = client.Mosaic.GetMosaicInfo(context.Background(), mosaicId)
+    if err != nil {
+        return account, mosaicIdUint64, fmt.Errorf("Invalid mosaic: %v\n", err)
+    }
+    return account, mosaicIdUint64, nil
 }
