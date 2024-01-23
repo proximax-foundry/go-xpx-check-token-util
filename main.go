@@ -99,7 +99,7 @@ func constructMsg() (string, []tgbotapi.MessageEntity) {
     strBalance := strconv.FormatFloat(*config.ThresholdBalance, 'f', -1, 64)
     strMsg := fmt.Sprintf(
         "Your account %s has %s balance less than %s, currently %f %s", 
-        *config.Account, mosaicName, strBalance, currBalance, mosaicName)
+        account.Address.Address, mosaicName, strBalance, currBalance, mosaicName)
     var entities []tgbotapi.MessageEntity
     entities = append(entities, tgbotapi.MessageEntity{
         Type: "text_link",
